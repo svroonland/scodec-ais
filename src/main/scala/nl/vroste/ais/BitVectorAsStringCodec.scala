@@ -1,10 +1,10 @@
-package ais
+package nl.vroste.ais
 
 import scodec.Codec
 import scodec.bits.BitVector
 import scodec.codecs._
 
-object BitVectorAsStringCodec {
+private[ais] object BitVectorAsStringCodec {
   implicit val charset = java.nio.charset.StandardCharsets.US_ASCII
 
   /**
@@ -30,4 +30,3 @@ object BitVectorAsStringCodec {
     bitVectorToSixBitString(remaining, acc + sixBitsToChar(charBits))
   }
 }
-

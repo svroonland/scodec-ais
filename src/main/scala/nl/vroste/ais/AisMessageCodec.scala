@@ -1,15 +1,15 @@
-package ais
+package nl.vroste.ais
 
 import java.time.{ Instant, LocalDateTime, ZoneOffset }
 
-import ais.AisDataTypeCodecs.{ aisAsciiString, decimal }
+import AisDataTypeCodecs.{ aisAsciiString, decimal }
 import scodec.Codec
 import scodec.codecs.{ bits, bool, discriminated, int8, intL, uint, _ }
 import shapeless.HNil
 
 import scala.math.BigDecimal.RoundingMode
-
-trait AisMessageCodec {
+import scodec.bits._
+private[ais] object AisMessageCodec {
   val etaCodec: Codec[Instant] =
     (uint(4) :: uint(5) :: uint(5) :: uint(6)).xmap[Instant](
       _.tupled match {
@@ -150,6 +150,24 @@ trait AisMessageCodec {
       ("virtualAidFlag" | bool(1)) ::
       ("assignedModeFlag" | bool(1))).as[AidToNavigationReport]
 
+  val staticDataReportPartACodec: Codec[StaticDataReportPartA] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("partNo" | constant(bin"00")) ::
+      ("vesselName" | aisAsciiString(20))).as
+
+  val staticDataReportPartBCodec: Codec[StaticDataReportPartB] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("partNo" | constant(bin"01")) ::
+      ("shipType" | uint(8)) ::
+      ("vendorId" | aisAsciiString(3)) ::
+      ("unitModelCode" | uint(4)) ::
+      ("serialNumber" | uint(20)) ::
+      ("callSign" | aisAsciiString(7)) ::
+      dimensionCodec ::
+      ("spare" | constantLenient(bin"000000"))).as
+
   val longRangeBroadcastMessageCodec: Codec[LongRangeAisBroadcastMessage] =
     (("repeatIndicator" | uint(2)) ::
       ("mmsi" | uint(30)) ::
@@ -171,9 +189,9 @@ trait AisMessageCodec {
       ("speedOverGround" | noneWhen(BigDecimal(63), decimal(6, 0, signed = true))) ::
       ("courseOverGround" | noneWhen(BigDecimal(511), decimal(9, 0, signed = true))) ::
       ("gnssPositionStatus" | int(1)) ::
-      ("spare" | ignore(1))).as[LongRangeAisBroadcastMessage]
+      ("spare" | constantLenient(bin"0"))).as[LongRangeAisBroadcastMessage]
 
-  implicit val codec: Codec[AisMessage] =
+  implicit val aisMessageCodec: Codec[AisMessage] =
     discriminated[AisMessage]
       .by(intL(6))
       .subcaseO(1)(PartialFunction.condOpt(_) {
@@ -200,6 +218,12 @@ trait AisMessageCodec {
       .subcaseO(21)(PartialFunction.condOpt(_) {
         case msg: AidToNavigationReport => msg
       })(aidToNavigationReportCodec)
+      .subcaseO[AisMessage](24)(PartialFunction.condOpt(_) {
+        case msg: StaticDataReportPartA => msg
+        case msg: StaticDataReportPartB => msg
+      })(
+        choice(staticDataReportPartACodec.upcast[AisMessage], staticDataReportPartBCodec.upcast[AisMessage])
+      )
       .subcaseO(27)(PartialFunction.condOpt(_) {
         case msg: LongRangeAisBroadcastMessage => msg
       })(longRangeBroadcastMessageCodec)

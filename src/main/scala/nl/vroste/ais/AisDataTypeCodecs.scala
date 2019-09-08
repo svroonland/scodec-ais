@@ -1,10 +1,10 @@
-package ais
+package nl.vroste.ais
 
 import scodec.Codec
 import scodec.bits.BitVector
 import scodec.codecs._
 
-object AisDataTypeCodecs {
+private[ais] object AisDataTypeCodecs {
   val sixBit                    = int(6)
   val aisAsciiChar: Codec[Char] = sixBit.xmap(toChar, fromChar)
   val padding                   = BitVector.low(6)
@@ -14,6 +14,13 @@ object AisDataTypeCodecs {
     (if (signed) int(length) else uint(length))
       .xmap[BigDecimal](i => BigDecimal.apply(i, decimals), _.setScale(-decimals).intValue())
 
+  /**
+    * Codec for an ASCII string of length `length`, encoded as 6-bit characters
+    *
+    * Total number of bits is 6 * `length`
+    *
+    * @param length Number of 6-bit characters
+    */
   def aisAsciiString(length: Int): Codec[String] =
     paddedFixedSizeBits(6 * length, list(sixBit), constant(padding))
       .xmap(

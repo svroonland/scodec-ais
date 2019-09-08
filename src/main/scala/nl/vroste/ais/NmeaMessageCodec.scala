@@ -1,26 +1,12 @@
-package ais
-
-import scodec.{ Attempt, Codec, DecodeResult, Decoder, Encoder, Err, SizeBound }
+package nl.vroste.ais
+import nl.vroste.ais.BitVectorAsStringCodec.sixBitEncodedString
 import scodec.bits.{ BitVector, ByteVector }
-import scodec.codecs._
-import BitVectorAsStringCodec._
+import scodec.codecs.{ checksummed, constant, limitedSizeBytes, string, _ }
+import scodec.{ Attempt, Codec, DecodeResult, Decoder, Err, SizeBound }
 
 import scala.util.Try
 
-case class NmeaMessage(
-  nrFragments: Int,
-  fragmentNr: Int,
-  sequentialId: Option[Int],
-  radioChannelCode: Char,
-  payload: BitVector, // Decoded
-  fillBits: Int
-)
-
-object NmeaMessage {
-
-//  def fromPayload(payload: BitVector, sequentialId: Option[Int], radioChannelCode: Char): Seq[NmeaMessage] = {
-//
-//  }
+private[ais] object NmeaMessageCodec {
 
   implicit val charset = java.nio.charset.StandardCharsets.US_ASCII
 
@@ -56,7 +42,7 @@ object NmeaMessage {
       (("payload" | suffixed(sixBitEncodedString, ','))) ~
       ("fillBits" | intEncodedAsChar)
 
-  implicit val codec: Codec[NmeaMessage] =
+  implicit val nmeaMessageCodec: Codec[NmeaMessage] =
     constant(ByteVector.encodeString("!").right.get) ~>
       ("checksummed" | checksummed(
         target = sentence,
@@ -67,7 +53,8 @@ object NmeaMessage {
         .as[NmeaMessage]
 
   def calculateChecksum(bitVector: BitVector): BitVector = {
-    val bytes          = bitVector.toByteVector.toSeq
+    val bytes = bitVector.toByteVector.toSeq
+    println(s"Calculating checksum for ${bitVector.decodeString}")
     val checksum       = bytes.foldLeft(0) { case (a, b) => a ^ b.toInt }
     val checksumString = checksum.toHexString.toUpperCase
     BitVector.encodeString(checksumString).right.get

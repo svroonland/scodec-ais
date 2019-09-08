@@ -1,12 +1,49 @@
-package ais
+package nl.vroste.ais
 
 import java.time.Instant
 
-import scodec.bits.BitVector
+import scodec.{ Attempt, Codec, Err }
+import scodec.bits.{ BitVector, ByteVector }
 
 sealed trait AisMessage
 
-case class Dimensions(toBow: Int, toStern: Int, toPort: Int, toStarboard: Int)
+object AisMessage {
+  import AttemptExtensions._
+  import NmeaMessageCodec._
+  import AisMessageCodec._
+
+  private val charset = java.nio.charset.StandardCharsets.US_ASCII
+
+  /**
+    * Decode an AIS message from one or more NMEA messages
+    *
+    * @param nmeaStrings NMEA messages for a single AIS message
+    * @return The decoded AIS message or a decoding error
+    */
+  def decode(nmeaStrings: String*): Either[Err, AisMessage] =
+    (for {
+      nmeaBits <- Attempt.successful(nmeaStrings.map(m => ByteVector(m.getBytes(charset)).bits))
+      nmea     <- Attempt.traverse(nmeaBits)(nmeaMessageCodec.decodeValue)
+      payload = nmea.map(_.payload).reduce(_ ++ _)
+      aisMessage <- aisMessageCodec.decodeValue(payload)
+    } yield aisMessage).toEither
+
+  /**
+    * Encode an AIS message as one or more NMEA messages
+    *
+    * @param message
+    * @param sequentialId
+    * @param radioChannelCode
+    * @return
+    */
+  def encode(
+    message: AisMessage,
+    sequentialId: Option[Int] = None,
+    radioChannelCode: Option[Char] = None
+  ): Seq[String] = ???
+}
+
+final case class Dimensions(toBow: Int, toStern: Int, toPort: Int, toStarboard: Int)
 object Dimensions {
   def create(toBow: Int, toStern: Int, toPort: Int, toStarboard: Int): Option[Dimensions] =
     if (toBow != 0 && toStern != 0 && toPort != 0 && toStarboard != 0)
@@ -28,7 +65,7 @@ sealed trait PositionReport extends AisMessage {
 /**
   * Type 1, 2 and 3 Position Report class A
   */
-case class PositionReportClassA(
+final case class PositionReportClassA(
   repeatIndicator: Int,
   mmsi: Int,
   navigationStatus: Int,
@@ -45,7 +82,7 @@ case class PositionReportClassA(
   radioStatus: Int
 ) extends PositionReport
 
-case class BinaryBroadcastMessage(
+final case class BinaryBroadcastMessage(
   repeatIndicator: Int,
   mmsi: Int,
   designatedAreaCode: Int,
@@ -53,7 +90,7 @@ case class BinaryBroadcastMessage(
   data: BitVector
 ) extends AisMessage
 
-case class ShipAndVoyageRelatedData(
+final case class ShipAndVoyageRelatedData(
   repeatIndicator: Int,
   mmsi: Int,
   aisVersion: Int,
@@ -72,7 +109,7 @@ case class ShipAndVoyageRelatedData(
 /**
   * Type 18 Position Report
   */
-case class PositionReportClassB(
+final case class PositionReportClassB(
   repeatIndicator: Int,
   mmsi: Int,
   speedOverGround: Option[BigDecimal],
@@ -95,7 +132,7 @@ case class PositionReportClassB(
 /**
   * Type 19 Position Report
   */
-case class PositionReportClassBExtended(
+final case class PositionReportClassBExtended(
   repeatIndicator: Int,
   mmsi: Int,
   speedOverGround: Option[BigDecimal],
@@ -114,7 +151,7 @@ case class PositionReportClassBExtended(
   assigned: Boolean
 ) extends PositionReport
 
-case class AidToNavigationReport(
+final case class AidToNavigationReport(
   repeatIndicator: Int,
   mmsi: Int,
   aid_type: Int,
@@ -130,6 +167,23 @@ case class AidToNavigationReport(
   raimFlag: Boolean,
   virtualAidFlag: Boolean,
   assignedModeFlag: Boolean
+) extends AisMessage
+
+case class StaticDataReportPartA(
+  repeatIndicator: Int,
+  mmsi: Int,
+  vesselName: String
+) extends AisMessage
+
+case class StaticDataReportPartB(
+  repeatIndicator: Int,
+  mmsi: Int,
+  shipType: Int,
+  vendorId: String,
+  unitModelCode: Int,
+  serialNumber: Int,
+  callSign: String,
+  dimensions: Option[Dimensions]
 ) extends AisMessage
 
 /**

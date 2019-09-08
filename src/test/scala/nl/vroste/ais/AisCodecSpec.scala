@@ -1,19 +1,13 @@
-package ais
+package nl.vroste.ais
 
 import org.scalatest._
 import scodec.Attempt.{ Failure, Successful }
-import scodec.{ Attempt, Codec }
 import scodec.bits.BitVector
+import scodec.{ Attempt, Codec }
 
-class AisCodecSpec
-  extends WordSpec
-  with Matchers
-  with OptionValues
-  with EitherValues
-  with Inspectors
-  with Inside
-  with AisMessageCodec {
-  implicit val charset = java.nio.charset.StandardCharsets.US_ASCII
+class AisCodecSpec extends WordSpec with Matchers with OptionValues with EitherValues with Inspectors with Inside {
+  import AisMessageCodec._
+  import NmeaMessageCodec._
 
   "Suffixed decoder" should {
     "decode properly" in {
@@ -22,7 +16,7 @@ class AisCodecSpec
         .right
         .get
 
-      val codec = NmeaMessage.suffixed(scodec.codecs.string, NmeaMessage.suffix.toByte())
+      val codec = NmeaMessageCodec.suffixed(scodec.codecs.string, NmeaMessageCodec.suffix.toByte())
 
       inside(codec.decode(aisMessage)) {
         case Successful(scodec.DecodeResult(value, remainder)) =>
@@ -46,14 +40,8 @@ class AisCodecSpec
     }
   }
 
-  def decodeAisMessage(message: String): Attempt[AisMessage] = {
-    val encoded = BitVector.encodeString(message).right.value
-
-    for {
-      nmea <- Codec[NmeaMessage].decodeValue(encoded)
-      ais  <- Codec[AisMessage].decodeValue(nmea.payload)
-    } yield ais
-  }
+  def decodeAisMessage(message: String*): Attempt[AisMessage] =
+    AisMessage.decode(message: _*).fold(Attempt.failure, Attempt.successful)
 
   "The AIS codec" should {
     "decode a PositionReport" in {
@@ -80,7 +68,7 @@ class AisCodecSpec
       }
     }
 
-    "decode a long range broadcast message" in {
+    "decode a type 27 long range broadcast message" in {
       val message = "!AIVDM,1,1,,,KkAbld803WCfq8RL,0*72"
 
       assertAttempt {
@@ -99,7 +87,38 @@ class AisCodecSpec
           }
         }
       }
+    }
 
+    "decode a type 24 static data report Part A" in {
+      val message = "!AIVDM,1,1,,A,H5``LL0h4AV0f22222222222220,2*76"
+
+      assertAttempt {
+        decodeAisMessage(message).map { ais =>
+          inside(ais) {
+            case p: StaticDataReportPartA =>
+              p.mmsi shouldBe 378150000
+              p.vesselName shouldBe "LADY K"
+          }
+        }
+      }
+    }
+
+    "decode a type 24 static data report Part B" in {
+      val message = "!AIVDM,1,1,,A,H5``LL4T653hhhiJ:<nphq18?320,0*46"
+
+      assertAttempt {
+        decodeAisMessage(message).map { ais =>
+          inside(ais) {
+            case p: StaticDataReportPartB =>
+              p.mmsi shouldBe 378150000
+              p.shipType shouldBe 36
+              p.vendorId shouldBe "FEC"
+              p.serialNumber shouldBe 199729
+              p.callSign shouldBe "ZJL6809"
+              p.dimensions should contain(Dimensions(9, 15, 3, 2))
+          }
+        }
+      }
     }
 
     "decode and encode an AIS message" in {
