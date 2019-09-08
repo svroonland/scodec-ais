@@ -194,37 +194,19 @@ private[ais] object AisMessageCodec {
   implicit val aisMessageCodec: Codec[AisMessage] =
     discriminated[AisMessage]
       .by(intL(6))
-      .subcaseO(1)(PartialFunction.condOpt(_) {
-        case msg: PositionReportClassA => msg
-      })(positionReportCodec)
-      .subcaseO(2)(PartialFunction.condOpt(_) {
-        case msg: PositionReportClassA => msg
-      })(positionReportCodec)
-      .subcaseO(3)(PartialFunction.condOpt(_) {
-        case msg: PositionReportClassA => msg
-      })(positionReportCodec)
-      .subcaseO(5)(PartialFunction.condOpt(_) {
-        case msg: ShipAndVoyageRelatedData => msg
-      })(shipAndVoyageRelatedDataCodec)
-      .subcaseO(8)(PartialFunction.condOpt(_) {
-        case msg: BinaryBroadcastMessage => msg
-      })(binaryBroadcastMessageCodec)
-      .subcaseO(18)(PartialFunction.condOpt(_) {
-        case msg: PositionReportClassB => msg
-      })(positionReportClassBCodec)
-      .subcaseO(19)(PartialFunction.condOpt(_) {
-        case msg: PositionReportClassBExtended => msg
-      })(positionReportClassBExtendedCodec)
-      .subcaseO(21)(PartialFunction.condOpt(_) {
-        case msg: AidToNavigationReport => msg
-      })(aidToNavigationReportCodec)
-      .subcaseO[AisMessage](24)(PartialFunction.condOpt(_) {
+      .subcaseO(1)(_.asOpt[PositionReportClassA])(positionReportCodec)
+      .subcaseO(2)(_.asOpt[PositionReportClassA])(positionReportCodec)
+      .subcaseO(3)(_.asOpt[PositionReportClassA])(positionReportCodec)
+      .subcaseO(5)(_.asOpt[ShipAndVoyageRelatedData])(shipAndVoyageRelatedDataCodec)
+      .subcaseO(8)(_.asOpt[BinaryBroadcastMessage])(binaryBroadcastMessageCodec)
+      .subcaseO(18)(_.asOpt[PositionReportClassB])(positionReportClassBCodec)
+      .subcaseO(19)(_.asOpt[PositionReportClassBExtended])(positionReportClassBExtendedCodec)
+      .subcaseO(21)(_.asOpt[AidToNavigationReport])(aidToNavigationReportCodec)
+      .subcaseP[AisMessage](24) {
         case msg: StaticDataReportPartA => msg
         case msg: StaticDataReportPartB => msg
-      })(
+      }(
         choice(staticDataReportPartACodec.upcast[AisMessage], staticDataReportPartBCodec.upcast[AisMessage])
       )
-      .subcaseO(27)(PartialFunction.condOpt(_) {
-        case msg: LongRangeAisBroadcastMessage => msg
-      })(longRangeBroadcastMessageCodec)
+      .subcaseO(27)(_.asOpt[LongRangeAisBroadcastMessage])(longRangeBroadcastMessageCodec)
 }

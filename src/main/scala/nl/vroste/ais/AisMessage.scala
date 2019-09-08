@@ -5,7 +5,14 @@ import java.time.Instant
 import scodec.{ Attempt, Codec, Err }
 import scodec.bits.{ BitVector, ByteVector }
 
-sealed trait AisMessage
+import scala.reflect.ClassTag
+
+sealed trait AisMessage { self =>
+  def asOpt[T <: AisMessage: ClassTag] = self match {
+    case instance: T => Some(instance)
+    case _           => None
+  }
+}
 
 object AisMessage {
   import AttemptExtensions._
