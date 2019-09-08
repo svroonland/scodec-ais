@@ -1,22 +1,15 @@
 package ais
 
-import java.time.{Instant, LocalDateTime, ZoneOffset}
+import java.time.{ Instant, LocalDateTime, ZoneOffset }
 
-import ais.AisDataTypeCodecs.{aisAsciiString, decimal}
+import ais.AisDataTypeCodecs.{ aisAsciiString, decimal }
 import scodec.Codec
-import scodec.bits.BitVector
-import scodec.codecs.{bits, bool, constant, discriminated, int8, intL, uint, _}
+import scodec.codecs.{ bits, bool, discriminated, int8, intL, uint, _ }
 import shapeless.HNil
 
-trait AisMessageCodec {
-  //  def fromNmeaMessages(messages: Seq[String]): Attempt[AisMessage] =
-  //    for {
-  //      encoded <- Attempt.fromEither(BitVector.encodeString())
-  //      nmea <- Codec[NmeaMessage].decodeValue(encoded)
-  //      ais <- Codec[AisMessage].decodeValue(nmea.payload)
-  //      _ = println(ais)
-  //    } yield ais
+import scala.math.BigDecimal.RoundingMode
 
+trait AisMessageCodec {
   val etaCodec: Codec[Instant] =
     (uint(4) :: uint(5) :: uint(5) :: uint(6)).xmap[Instant](
       _.tupled match {
@@ -24,7 +17,8 @@ trait AisMessageCodec {
           Instant.from(
             LocalDateTime // TODO year
               .of(2018, month, day, hour, minute)
-              .atZone(ZoneOffset.UTC))
+              .atZone(ZoneOffset.UTC)
+          )
       },
       instant => {
         val dt = instant.atZone(ZoneOffset.UTC)
@@ -32,59 +26,48 @@ trait AisMessageCodec {
       }
     )
 
-  def withSentinel[T](sentinelValue: T, codec: Codec[T]): Codec[Option[T]] =
+  def noneWhen[T](sentinelValue: T, codec: Codec[T]): Codec[Option[T]] =
     codec.xmap(Some(_).filter(_ != sentinelValue), _ getOrElse sentinelValue)
 
   def lonI4Codec = {
     val lonIn10000thMinutes = decimal(28, 4, signed = true)
-    val lonInDegrees = lonIn10000thMinutes.xmapc(_ / 60)(_ * 60)
+    val lonInDegrees        = lonIn10000thMinutes.xmapc(_ / 60)(_ * 60)
 
-    withSentinel(BigDecimal(181), lonInDegrees)
+    noneWhen(BigDecimal(181), lonInDegrees)
   }
 
   def latI4Codec = {
     val latIn10000thMinutes = decimal(27, 4, signed = true)
-    val latInDegrees = latIn10000thMinutes.xmapc(_ / 60)(_ * 60)
+    val latInDegrees        = latIn10000thMinutes.xmapc(_ / 60)(_ * 60)
 
-    withSentinel(BigDecimal(91), latInDegrees)
+    noneWhen(BigDecimal(91), latInDegrees)
   }
 
-  val positionReportCodec: Codec[PositionReport] =
+  val positionReportCodec: Codec[PositionReportClassA] =
     (("repeatIndicator" | uint(2)) ::
       ("mmsi" | uint(30)) ::
       ("navigationStatus" | uint(4)) ::
-      ("rateOfTurn" | withSentinel(-128, int8)) ::
-      ("speedOverGround" | withSentinel(BigDecimal(511), decimal(10, 1))) ::
+      ("rateOfTurn" | noneWhen(-128, int8)) ::
+      ("speedOverGround" | noneWhen(BigDecimal(511), decimal(10, 1))) ::
       ("positionAccuracy" | bool(1)) ::
       ("longitude" | lonI4Codec) ::
       ("latitude" | latI4Codec) ::
-      ("courseOverGround" | withSentinel(BigDecimal(3600), decimal(12, 1))) ::
-      ("trueHeading" | withSentinel(511, uint(9))) ::
-      ("timestamp" | withSentinel(60, uint(6))) ::
+      ("courseOverGround" | noneWhen(BigDecimal(3600), decimal(12, 1))) ::
+      ("trueHeading" | noneWhen(511, uint(9))) ::
+      ("timestamp" | noneWhen(60, uint(6))) ::
       ("maneuverIndicator" | uint(2)) ::
-      ("spare" | constant(BitVector.low(3))) ::
+      ("spare" | ignore(3)) ::
       ("raimFlag" | bool(1)) ::
       ("radioStatus" | uint(19))).as
 
-  val aidToNavigationReportCodec: Codec[AidToNavigationReport] =
-    (("repeatIndicator" | uint(2)) ::
-      ("mmsi" | uint(30)) ::
-      ("aidType" | uint(5)) ::
-      ("vesselName" | aisAsciiString(20)) ::
-      ("positionAccuracy" | bool(1)) ::
-      ("longitude" | lonI4Codec) ::
-      ("latitude" | latI4Codec) ::
-      ("dimensionToBow" | uint(9)) ::
+  val dimensionCodec: Codec[Option[Dimensions]] =
+    (("dimensionToBow" | uint(9)) ::
       ("dimensionToStern" | uint(9)) ::
       ("dimensionToPort" | uint(6)) ::
-      ("dimensionToStarboard" | uint(6)) ::
-      ("typeOfEPFD" | uint(4)) ::
-      ("timestamp" | withSentinel(60, uint(6))) ::
-      ("offPosition" | bool(1)) ::
-      ("regionalReserved" | bits(8)) ::
-      ("raimFlag" | bool(1)) ::
-      ("virtualAidFlag" | bool(1)) ::
-      ("assignedModeFlag" | bool(1))).as[AidToNavigationReport]
+      ("dimensionToStarboard" | uint(6)))
+      .xmapc(x => (Dimensions.create _).tupled(x.tupled))(
+        _.map(d => d.toBow :: d.toStern :: d.toPort :: d.toStarboard :: HNil).getOrElse(0 :: 0 :: 0 :: 0 :: HNil)
+      )
 
   val shipAndVoyageRelatedDataCodec: Codec[ShipAndVoyageRelatedData] =
     (("repeatIndicator" | uint(2)) ::
@@ -94,32 +77,130 @@ trait AisMessageCodec {
       ("callSign" | aisAsciiString(7)) ::
       ("vesselName" | aisAsciiString(20)) ::
       ("shipType" | uint(8)) ::
-      ("dimensionToBow" | uint(9)) ::
-      ("dimensionToStern" | uint(9)) ::
-      ("dimensionToPort" | uint(6)) ::
-      ("dimensionToStarboard" | uint(6)) ::
+      dimensionCodec ::
       ("positionFixType" | uint(4)) ::
       ("eta" | etaCodec) ::
       ("draught" | decimal(8, 1)) ::
       ("destination" | aisAsciiString(20)) ::
-      ("dataTerminalReady" | bool(1)) <~ constant(BitVector.zero)).as
+      ("dataTerminalReady" | bool(1)) <~ ignore(1)).as
+
+  val binaryBroadcastMessageCodec: Codec[BinaryBroadcastMessage] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("spare" | ignore(3)) ::
+      ("designatedAreaCode" | uint(10)) ::
+      ("functionalId" | uint(6)) ::
+      ("data" | bits)).as[BinaryBroadcastMessage]
+
+  val positionReportClassBCodec: Codec[PositionReportClassB] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("regionalReserved" | ignore(8)) ::
+      ("speedOverGround" | noneWhen(BigDecimal(511), decimal(10, 1))) ::
+      ("positionAccuracy" | bool(1)) ::
+      ("longitude" | lonI4Codec) ::
+      ("latitude" | latI4Codec) ::
+      ("courseOverGround" | noneWhen(BigDecimal(3600), decimal(12, 1))) ::
+      ("trueHeading" | noneWhen(511, uint(9))) ::
+      ("timestamp" | noneWhen(60, uint(6))) ::
+      ("regionalReserved" | ignore(2)) ::
+      ("csUnit" | bool(1)) ::
+      ("displayFlag" | bool(1)) ::
+      ("dscFlag" | bool(1)) ::
+      ("bandFlag" | bool(1)) ::
+      ("message22Flag" | bool(1)) ::
+      ("assignedFlag" | bool(1)) ::
+      ("raimFlag" | bool(1)) ::
+      ("radioStatus" | uint(20))).as[PositionReportClassB]
+
+  val positionReportClassBExtendedCodec: Codec[PositionReportClassBExtended] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("regionalReserved" | ignore(8)) ::
+      ("speedOverGround" | noneWhen(BigDecimal(511), decimal(10, 1))) ::
+      ("positionAccuracy" | bool(1)) ::
+      ("longitude" | lonI4Codec) ::
+      ("latitude" | latI4Codec) ::
+      ("courseOverGround" | noneWhen(BigDecimal(3600), decimal(12, 1))) ::
+      ("trueHeading" | noneWhen(511, uint(9))) ::
+      ("timestamp" | noneWhen(60, uint(6))) ::
+      ("regionalReserved" | ignore(4)) ::
+      ("name" | aisAsciiString(20)) ::
+      ("shipType" | uint(8)) ::
+      ("dimensions" | dimensionCodec) ::
+      ("positionFixType" | uint(4)) ::
+      ("raimFlag" | bool(1)) ::
+      ("dte" | bool(1)) ::
+      ("assignedFlag" | bool(1))).as[PositionReportClassBExtended]
+
+  val aidToNavigationReportCodec: Codec[AidToNavigationReport] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("aidType" | uint(5)) ::
+      ("vesselName" | aisAsciiString(20)) ::
+      ("positionAccuracy" | bool(1)) ::
+      ("longitude" | lonI4Codec) ::
+      ("latitude" | latI4Codec) ::
+      dimensionCodec ::
+      ("typeOfEPFD" | uint(4)) ::
+      ("timestamp" | noneWhen(60, uint(6))) ::
+      ("offPosition" | bool(1)) ::
+      ("regionalReserved" | bits(8)) ::
+      ("raimFlag" | bool(1)) ::
+      ("virtualAidFlag" | bool(1)) ::
+      ("assignedModeFlag" | bool(1))).as[AidToNavigationReport]
+
+  val longRangeBroadcastMessageCodec: Codec[LongRangeAisBroadcastMessage] =
+    (("repeatIndicator" | uint(2)) ::
+      ("mmsi" | uint(30)) ::
+      ("positionAccuracy" | bool(1)) ::
+      ("raimFlag" | bool(1)) ::
+      ("navigationStatus" | uint(4)) ::
+      ("longitude" | {
+        val lonIn10thMinutes = decimal(18, 1, signed = true)
+        val lonInDegrees     = lonIn10thMinutes.xmapc(i => ((i / 60).setScale(4, RoundingMode.HALF_UP)))(_ * 60)
+
+        noneWhen(BigDecimal(181), lonInDegrees)
+      }) ::
+      ("latitude" | {
+        val latIn10thMinutes = decimal(17, 1, signed = true)
+        val latInDegrees     = latIn10thMinutes.xmapc(i => (i / 60).setScale(4, RoundingMode.HALF_UP))(_ * 60)
+
+        noneWhen(BigDecimal(91), latInDegrees)
+      }) ::
+      ("speedOverGround" | noneWhen(BigDecimal(63), decimal(6, 0, signed = true))) ::
+      ("courseOverGround" | noneWhen(BigDecimal(511), decimal(9, 0, signed = true))) ::
+      ("gnssPositionStatus" | int(1)) ::
+      ("spare" | ignore(1))).as[LongRangeAisBroadcastMessage]
 
   implicit val codec: Codec[AisMessage] =
     discriminated[AisMessage]
       .by(intL(6))
       .subcaseO(1)(PartialFunction.condOpt(_) {
-        case msg: PositionReport => msg
+        case msg: PositionReportClassA => msg
       })(positionReportCodec)
       .subcaseO(2)(PartialFunction.condOpt(_) {
-        case msg: PositionReport => msg
+        case msg: PositionReportClassA => msg
       })(positionReportCodec)
       .subcaseO(3)(PartialFunction.condOpt(_) {
-        case msg: PositionReport => msg
+        case msg: PositionReportClassA => msg
       })(positionReportCodec)
       .subcaseO(5)(PartialFunction.condOpt(_) {
         case msg: ShipAndVoyageRelatedData => msg
       })(shipAndVoyageRelatedDataCodec)
+      .subcaseO(8)(PartialFunction.condOpt(_) {
+        case msg: BinaryBroadcastMessage => msg
+      })(binaryBroadcastMessageCodec)
+      .subcaseO(18)(PartialFunction.condOpt(_) {
+        case msg: PositionReportClassB => msg
+      })(positionReportClassBCodec)
+      .subcaseO(19)(PartialFunction.condOpt(_) {
+        case msg: PositionReportClassBExtended => msg
+      })(positionReportClassBExtendedCodec)
       .subcaseO(21)(PartialFunction.condOpt(_) {
         case msg: AidToNavigationReport => msg
       })(aidToNavigationReportCodec)
+      .subcaseO(27)(PartialFunction.condOpt(_) {
+        case msg: LongRangeAisBroadcastMessage => msg
+      })(longRangeBroadcastMessageCodec)
 }
