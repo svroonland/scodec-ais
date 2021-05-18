@@ -10,7 +10,7 @@ lazy val root = (project in file(".")).
     name := "Scala AIS codec",
     libraryDependencies ++= Seq(
       "org.scodec" %% "scodec-bits" % "1.1.12",
-      "org.scodec" %% "scodec-core" % "1.11.4",
+      "org.scodec" %% "scodec-core" % "1.11.8",
       scalaTest % Test
     ),
     ThisBuild / turbo := true
